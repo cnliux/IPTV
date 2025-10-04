@@ -1,6 +1,5 @@
 央视频道,#genre#
 CCTV6,http://112.27.235.94:8000/hls/7/index.m3u8#http://[2409:8087:1a01:df::4077]:80/ottrrs.hl.chinamobile.com/PLTV/88888888/224/3221226010/index.m3u8
-CCTV8,http://112.27.235.94:8000/hls/9/index.m3u8#http://222.169.85.8:9901/tsfile/live/0008_1.m3u8#http://[2409:8087:1a01:df::4077]/ottrrs.hl.chinamobile.com/PLTV/88888888/8/3221226008/index.m3u8
 CCTV12,http://112.27.235.94:8000/hls/13/index.m3u8#http://dmggg.tyzb.fun:26355/migu/673168185.m3u8?migutoken=ad71b9aeae82874df1cd04f9b6a1672151c3e9a334d2178e3e78cbb8994cbd46ec8388903c1e78ccc22f7e0b25d1e1ab2bf9cd50d093a483252160120e87fe46793d2e28c380f0189ec08e6d12#https://migu.188766.xyz/?migutoken=fb8f628e7fe63abb6a63c1d3f56d36e8&id=CCTV12&pp=1#http://[2409:8087:1a01:df::4077]:80/ottrrs.hl.chinamobile.com/PLTV/88888888/224/3221225731/index.m3u8#http://[2409:8087:1a01:df::4077]:80/ottrrs.hl.chinamobile.com/TVOD/88888888/224/3221225731/index.m3u8
 
 卫视频道,#genre#
