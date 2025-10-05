@@ -1,5 +1,5 @@
-2025-10-04 17:14:22 - root - INFO - ✅ 配置加载完成
-2025-10-04 17:14:22 - root - INFO - 
+2025-10-05 17:14:29 - root - INFO - ✅ 配置加载完成
+2025-10-05 17:14:29 - root - INFO - 
 
    ____   _   _   _       ___   _   _  __  __
   / ___| | \ | | | |     |_ _| | | | | \ \/ /
@@ -9,7 +9,7 @@
     
 ╔══════════════════════════════════════════════════════╗
 ║  IPTV智能处理系统 v1.0.1                                ║
-║  启动时间: 2025-10-04 17:14:22                        ║
+║  启动时间: 2025-10-05 17:14:29                        ║
 ╟──────────────────────────────────────────────────────╢
 ║  处理流程:                                            ║
 ║   1. 获取订阅源 → 2. 解析频道 → 3. 去重              ║
@@ -32,51 +32,38 @@
 ║  • 日志级别: INFO                                          ║
 ╚══════════════════════════════════════════════════════╝
 
-2025-10-04 17:14:22 - root - INFO - 
+2025-10-05 17:14:29 - root - INFO - 
 🔹🔹 阶段1/7：数据准备
-2025-10-04 17:14:22 - root - INFO - • 加载黑名单: 27445条
-2025-10-04 17:14:22 - root - INFO - • 加载白名单: 0条
-2025-10-04 17:14:22 - root - INFO - • 加载订阅源: 72个
-2025-10-04 17:14:22 - root - INFO - 
+2025-10-05 17:14:29 - root - INFO - • 加载黑名单: 27445条
+2025-10-05 17:14:29 - root - INFO - • 加载白名单: 0条
+2025-10-05 17:14:29 - root - INFO - • 加载订阅源: 17个
+2025-10-05 17:14:29 - root - INFO - 
 🔹🔹 阶段2/7：获取订阅源
-2025-10-04 17:14:23 - core.fetcher - WARNING - Attempt 1/3 failed: https://raw.githubusercontent.com/vbskycn/iptv/refs/heads/master/tv/hd.txt - HTTP status 404
-2025-10-04 17:14:23 - core.fetcher - WARNING - Attempt 1/3 failed: https://raw.githubusercontent.com/qinvision/Film-Television/main/dujuejiami.txt - HTTP status 404
-2025-10-04 17:14:23 - core.fetcher - WARNING - Attempt 1/3 failed: https://raw.githubusercontent.com/YueChan/Live/main/APTV.m3u - HTTP status 404
-2025-10-04 17:14:24 - core.fetcher - WARNING - Attempt 1/3 failed: https://raw.githubusercontent.com/vbskycn/iptv/master/tv/hd.txt - HTTP status 404
-2025-10-04 17:14:24 - core.fetcher - WARNING - Attempt 2/3 failed: https://raw.githubusercontent.com/vbskycn/iptv/refs/heads/master/tv/hd.txt - HTTP status 404
-2025-10-04 17:14:24 - core.fetcher - WARNING - Attempt 2/3 failed: https://raw.githubusercontent.com/qinvision/Film-Television/main/dujuejiami.txt - HTTP status 404
-2025-10-04 17:14:24 - core.fetcher - WARNING - Attempt 2/3 failed: https://raw.githubusercontent.com/YueChan/Live/main/APTV.m3u - HTTP status 404
-2025-10-04 17:14:25 - core.fetcher - WARNING - Attempt 2/3 failed: https://raw.githubusercontent.com/vbskycn/iptv/master/tv/hd.txt - HTTP status 404
-2025-10-04 17:14:26 - core.fetcher - WARNING - Attempt 3/3 failed: https://raw.githubusercontent.com/vbskycn/iptv/refs/heads/master/tv/hd.txt - HTTP status 404
-2025-10-04 17:14:26 - core.fetcher - WARNING - Attempt 3/3 failed: https://raw.githubusercontent.com/qinvision/Film-Television/main/dujuejiami.txt - HTTP status 404
-2025-10-04 17:14:26 - core.fetcher - WARNING - Attempt 3/3 failed: https://raw.githubusercontent.com/YueChan/Live/main/APTV.m3u - HTTP status 404
-2025-10-04 17:14:27 - core.fetcher - WARNING - Attempt 3/3 failed: https://raw.githubusercontent.com/vbskycn/iptv/master/tv/hd.txt - HTTP status 404
-2025-10-04 17:14:27 - root - INFO - ✅ 获取完成 | 成功: 65/72
-2025-10-04 17:14:27 - root - INFO - 
+2025-10-05 17:14:30 - root - INFO - ✅ 获取完成 | 成功: 16/17
+2025-10-05 17:14:30 - root - INFO - 
 🔹🔹 阶段3/7：解析频道
-2025-10-04 17:14:37 - core.parser - WARNING - URL参数处理失败: http://[2409：8087：3869：8021：1001：：e5]：6610/PLTV/88888910/224/3221225701/index.m3u8, 错误: Invalid IPv6 URL
-2025-10-04 17:14:37 - root - INFO - ✅ 解析完成 | 总频道: 825211 | 唯一源: 323480
-2025-10-04 17:14:37 - root - INFO - 
+2025-10-05 17:14:37 - root - INFO - ✅ 解析完成 | 总频道: 696656 | 唯一源: 267057
+2025-10-05 17:14:37 - root - INFO - 
 🔹🔹 阶段4/7：数据处理
-2025-10-04 17:38:03 - root - INFO - ✔ 处理完成 | 去重后: 323480 | 过滤后: 290593
-2025-10-04 17:38:03 - root - INFO - 
+2025-10-05 17:34:27 - root - INFO - ✔ 处理完成 | 去重后: 267057 | 过滤后: 254226
+2025-10-05 17:34:27 - root - INFO - 
 🔹🔹 阶段5/7：智能分类
-2025-10-04 17:38:03 - core.matcher - INFO - 分类器初始化完成 | 模板规则: 1495条
-2025-10-04 17:38:07 - root - INFO - ✅ 分类完成 | 已分类: 165960 | 未分类: 124633
-2025-10-04 17:38:07 - root - INFO - 
+2025-10-05 17:34:27 - core.matcher - INFO - 分类器初始化完成 | 模板规则: 1495条
+2025-10-05 17:34:28 - root - INFO - ✅ 分类完成 | 已分类: 152913 | 未分类: 101313
+2025-10-05 17:34:28 - root - INFO - 
 🔹🔹 阶段6/7：测速测试
-2025-10-04 21:01:37 - root - INFO - ✅ 测速完成 | 在线: 5765/290593 | 失败: 0
-2025-10-04 21:01:37 - root - INFO - 
+2025-10-05 20:27:30 - root - INFO - ✅ 测速完成 | 在线: 1997/254226 | 失败: 0
+2025-10-05 20:27:30 - root - INFO - 
 🔹🔹 阶段7/7：结果导出
-2025-10-04 21:01:37 - core.exporter - INFO - 主文件导出完成 | M3U: outputs/all.m3u (1205频道) | TXT: outputs/all.txt (1205频道)
-2025-10-04 21:01:37 - core.exporter - INFO - IPV4频道导出完成 | TXT: ipv4.txt (1198频道) | M3U: ipv4.m3u (1198频道)
-2025-10-04 21:01:37 - core.exporter - INFO - IPV6频道导出完成 | TXT: ipv6.txt (7频道) | M3U: ipv6.m3u (7频道)
-2025-10-04 21:01:37 - core.exporter - INFO - 未分类频道已保存 | 文件: config/uncategorized_channels.txt | 分组数: 206 | 频道数: 124633
-2025-10-04 21:01:37 - root - INFO - 
+2025-10-05 20:27:30 - core.exporter - INFO - 主文件导出完成 | M3U: outputs/all.m3u (1393频道) | TXT: outputs/all.txt (1393频道)
+2025-10-05 20:27:30 - core.exporter - INFO - IPV4频道导出完成 | TXT: ipv4.txt (1385频道) | M3U: ipv4.m3u (1385频道)
+2025-10-05 20:27:30 - core.exporter - INFO - IPV6频道导出完成 | TXT: ipv6.txt (8频道) | M3U: ipv6.m3u (8频道)
+2025-10-05 20:27:30 - core.exporter - INFO - 未分类频道已保存 | 文件: config/uncategorized_channels.txt | 分组数: 72 | 频道数: 101313
+2025-10-05 20:27:30 - root - INFO - 
 ============================================================
-2025-10-04 21:01:37 - root - INFO - 📊 最终统计
-2025-10-04 21:01:37 - root - INFO - • 总处理频道: 290593
-2025-10-04 21:01:37 - root - INFO - • 在线频道: 5765 (成功率: 2.0%)
-2025-10-04 21:01:37 - root - INFO - • 未分类频道: 124633
-2025-10-04 21:01:37 - root - INFO - ============================================================
+2025-10-05 20:27:30 - root - INFO - 📊 最终统计
+2025-10-05 20:27:30 - root - INFO - • 总处理频道: 254226
+2025-10-05 20:27:30 - root - INFO - • 在线频道: 1997 (成功率: 0.8%)
+2025-10-05 20:27:30 - root - INFO - • 未分类频道: 101313
+2025-10-05 20:27:30 - root - INFO - ============================================================
 🎉 任务完成！
