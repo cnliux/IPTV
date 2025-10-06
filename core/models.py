@@ -2,9 +2,10 @@ import re
 from typing import ClassVar
 
 class Channel:
-    """频道数据模型（内存优化版）"""
+    """频道数据模型（增强版，支持调试信息）"""
     __slots__ = ['name', 'url', 'category', 'original_category', 
-                'status', 'response_time', 'download_speed']
+                'status', 'response_time', 'download_speed',
+                'source_file', 'source_line', 'logo']  # 添加调试字段
 
     # 类变量（静态变量）定义
     IPV4_PATTERN: ClassVar[re.Pattern] = re.compile(
@@ -30,6 +31,9 @@ class Channel:
         self.status = status
         self.response_time = response_time
         self.download_speed = download_speed
+        self.source_file = "unknown"  # 源文件名称
+        self.source_line = 0          # 源文件行号
+        self.logo = None              # 台标URL
 
     @classmethod
     def classify_ip_type(cls, url: str) -> str:
