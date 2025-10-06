@@ -3,6 +3,8 @@ import aiohttp
 import time
 import re
 import logging
+import os
+import gc
 from typing import List, Set, Tuple, Optional, Dict, Callable
 from collections import defaultdict
 from urllib.parse import urlparse
@@ -12,7 +14,7 @@ from .models import Channel
 logger = logging.getLogger(__name__)
 
 class SpeedTester:
-    """高性能流媒体测速引擎（完整优化版）"""
+    """高性能流媒体测速引擎（完整修复版）"""
 
     def __init__(self, 
                  timeout: float = 5.0, 
@@ -22,19 +24,19 @@ class SpeedTester:
                  enable_logging: bool = True,
                  config: Optional[ConfigParser] = None):
         """
-        初始化测速器
-        
-        参数:
-            timeout: 基础超时时间(秒)
-            concurrency: 最大并发数
-            max_attempts: 最大重试次数
-            min_download_speed: HTTP最低速度要求(KB/s)
-            enable_logging: 是否启用日志
-            config: 配置对象
+        初始化测速器（修复Windows文件描述符限制）
         """
+        # Windows系统限制并发数
+        if os.name == 'nt':
+            max_concurrency = min(concurrency, 30)  # Windows限制为30
+            if concurrency > max_concurrency:
+                logger.warning(f"Windows系统并发数限制为{max_concurrency}（原{concurrency}）")
+            self.concurrency = max_concurrency
+        else:
+            self.concurrency = max(1, min(concurrency, 100))
+        
         # 基础配置
         self.timeout = timeout
-        self.concurrency = max(1, concurrency)
         self.max_attempts = max(1, max_attempts)
         self.min_download_speed = max(0.1, min_download_speed)
         self._enable_logging = enable_logging
@@ -44,7 +46,7 @@ class SpeedTester:
         self.max_download_size = self.config.getint(
             'TESTER', 
             'max_download_size', 
-            fallback=100 * 1024  # 默认100KB
+            fallback=100 * 1024
         )
         
         # 初始化日志系统
@@ -65,11 +67,13 @@ class SpeedTester:
         self.failed_ips: Dict[str, int] = defaultdict(int)
         self.max_failures_per_ip = self.config.getint('PROTECTION', 'max_failures_per_ip', fallback=5)
         self.blocked_ips: Set[str] = set()
-        self.ip_cooldown: Dict[str, float] = {}  # IP冷却时间记录
+        self.ip_cooldown: Dict[str, float] = {}
         self.min_ip_interval = self.config.getfloat('PROTECTION', 'min_ip_interval', fallback=0.5)
         
-        # 并发控制
-        self.semaphore = asyncio.BoundedSemaphore(self.concurrency)
+        # 并发控制（修复关键）
+        self._active_tasks = 0
+        self._max_active_tasks = self.concurrency
+        self._task_condition = asyncio.Condition()
         
         # 统计
         self.success_count = 0
@@ -81,24 +85,19 @@ class SpeedTester:
         self.logger = logging.getLogger('core.tester')
         self.logger.disabled = not self._enable_logging
         
-        # 创建安全的日志方法
-        self.log = self._create_log_method()
-
-    def _create_log_method(self):
-        """创建带开关的日志方法"""
         def make_log_method(level):
             def log_method(msg, *args, **kwargs):
                 if self._enable_logging:
                     getattr(self.logger, level)(msg, *args, **kwargs)
             return log_method
         
-        return type('LogMethod', (), {
+        self.log = type('LogMethod', (), {
             'debug': make_log_method('debug'),
             'info': make_log_method('info'),
             'warning': make_log_method('warning'),
             'error': make_log_method('error'),
             'exception': make_log_method('exception')
-        })
+        })()
 
     async def test_channels(self, 
                           channels: List[Channel], 
@@ -106,13 +105,7 @@ class SpeedTester:
                           failed_urls: Optional[Set[str]] = None, 
                           white_list: Optional[Set[str]] = None) -> None:
         """
-        批量测试频道（安全版本）
-        
-        参数:
-            channels: 频道列表
-            progress_cb: 进度回调函数
-            failed_urls: 存储失败URL的集合
-            white_list: 白名单集合
+        批量测试频道（安全版本，修复文件描述符限制）
         """
         failed_urls = failed_urls or set()
         white_list = white_list or set()
@@ -123,24 +116,14 @@ class SpeedTester:
         self.start_time = time.time()
         
         self.log.info(
-            "▶️ 开始测速 | 总数: %d | 并发: %d | 单IP最大频道: %d | 最大下载量: %dKB",
-            self.total_count, self.concurrency, self.max_channels_per_ip,
-            self.max_download_size // 1024
+            "▶️ 开始测速 | 总数: %d | 并发: %d | 单IP最大频道: %d",
+            self.total_count, self.concurrency, self.max_channels_per_ip
         )
 
-        # 智能IP分组
-        ip_groups = self._group_channels_by_ip(channels, white_list)
-        
-        self.log.info(
-            "📊 IP分组完成 | 总组数: %d | 最大组: %d | 平均组: %.1f",
-            len(ip_groups), max(len(g) for g in ip_groups.values()), 
-            sum(len(g) for g in ip_groups.values())/len(ip_groups)
-        )
-
-        # 创建自定义connector
+        # 创建自定义connector（关键修复）
         connector = aiohttp.TCPConnector(
             limit=self.concurrency,
-            force_close=False,
+            force_close=True,
             enable_cleanup_closed=True,
             ssl=False
         )
@@ -150,133 +133,66 @@ class SpeedTester:
                 connector=connector,
                 timeout=aiohttp.ClientTimeout(total=self.timeout)
             ) as session:
-                # 动态批处理
-                batch_size = self._calculate_batch_size(len(ip_groups))
-                tasks = []
+                # 使用带限制的批处理
+                await self._process_batch_with_limits(
+                    session, channels, progress_cb, failed_urls, white_list
+                )
                 
-                for ip, group in ip_groups.items():
-                    if ip not in self.blocked_ips:
-                        task = self._process_ip_group(
-                            session, ip, group, progress_cb, failed_urls, white_list)
-                        tasks.append(task)
-                        
-                        if len(tasks) >= batch_size:
-                            await self._safe_gather(tasks)
-                            progress_cb(len(tasks))
-                            tasks = []
-                
-                if tasks:
-                    await self._safe_gather(tasks)
-                    progress_cb(len(tasks))
         except Exception as e:
             self.log.error("测试过程中发生错误: %s", str(e))
             if "_abort" not in str(e):
                 raise
         finally:
             await connector.close()
-        
-        elapsed = time.time() - self.start_time
-        success_rate = (self.success_count / self.total_count) * 100 if self.total_count > 0 else 0
-        self.log.info(
-            "✅ 测速完成 | 成功: %d(%.1f%%) | 失败: %d | 屏蔽IP: %d | 用时: %.1fs",
-            self.success_count, success_rate,
-            self.total_count - self.success_count,
-            len(self.blocked_ips),
-            elapsed
-        )
+            elapsed = time.time() - self.start_time
+            success_rate = (self.success_count / self.total_count) * 100 if self.total_count > 0 else 0
+            self.log.info(
+                "✅ 测速完成 | 成功: %d(%.1f%%) | 失败: %d | 屏蔽IP: %d | 用时: %.1fs",
+                self.success_count, success_rate,
+                self.total_count - self.success_count,
+                len(self.blocked_ips),
+                elapsed
+            )
 
-    async def _safe_gather(self, tasks):
-        """安全执行gather操作"""
+    async def _process_batch_with_limits(self, session, channels, progress_cb, failed_urls, white_list):
+        """带连接数限制的批处理"""
+        tasks = []
+        for channel in channels:
+            # 等待可用槽位
+            async with self._task_condition:
+                await self._task_condition.wait_for(
+                    lambda: self._active_tasks < self._max_active_tasks
+                )
+                self._active_tasks += 1
+            
+            # 创建任务
+            task = asyncio.create_task(
+                self._test_single_channel_limited(session, channel, progress_cb, failed_urls, white_list)
+            )
+            tasks.append(task)
+        
+        # 安全执行，避免异常传播
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # 处理异常结果
+        for result in results:
+            if isinstance(result, Exception):
+                self.log.error("任务执行异常: %s", str(result))
+
+    async def _test_single_channel_limited(self, session, channel, progress_cb, failed_urls, white_list):
+        """带资源限制的单频道测试"""
         try:
-            await asyncio.gather(*tasks)
+            await self._test_single_channel(session, channel, progress_cb, failed_urls, white_list)
         except Exception as e:
-            self.log.warning("批处理任务执行异常: %s", str(e))
-
-    def _calculate_batch_size(self, total_groups: int) -> int:
-        """动态计算批处理大小"""
-        if total_groups <= 100:
-            return total_groups
-        elif total_groups <= 1000:
-            return 100
-        return min(500, max(50, total_groups // 20))
-
-    def _group_channels_by_ip(self, 
-                            channels: List[Channel],
-                            white_list: Set[str]) -> Dict[str, List[Channel]]:
-        """
-        改进版IP分组逻辑
-        返回: { "ip_0": [ch1,ch2...], "ip_1": [...] }
-        """
-        groups = defaultdict(list)
-        ip_counter = defaultdict(int)
-        
-        # 白名单独立分组
-        whitelist_group = [ch for ch in channels if self._is_in_white_list(ch, white_list)]
-        if whitelist_group:
-            groups["whitelist"] = whitelist_group
-        
-        # 常规分组
-        for ch in channels:
-            if self._is_in_white_list(ch, white_list):
-                continue
-                
-            ip = self._extract_ip_from_url(ch.url)
-            group_idx = ip_counter[ip] // self.max_channels_per_ip
-            group_key = f"{ip}_{group_idx}"
-            
-            groups[group_key].append(ch)
-            ip_counter[ip] += 1
-            
-            self.log.debug("IP %s 频道数超过 %d，创建分组 %s", 
-                         ip, self.max_channels_per_ip, group_key)
-        
-        return groups
-
-    async def _process_ip_group(self, 
-                              session: aiohttp.ClientSession,
-                              ip: str, 
-                              channels: List[Channel],
-                              progress_cb: Callable,
-                              failed_urls: Set[str],
-                              white_list: Set[str]) -> None:
-        """处理IP分组（带动态冷却）"""
-        # 动态冷却计算
-        current_time = time.time()
-        if ip in self.ip_cooldown:
-            elapsed = current_time - self.ip_cooldown[ip]
-            cool_down = max(0, self.min_ip_interval * (1 + len(channels)/self.max_channels_per_ip) - elapsed)
-            if cool_down > 0:
-                self.log.debug("⏳ IP %s 冷却中 (%.2fs)", ip, cool_down)
-                await asyncio.sleep(cool_down)
-        
-        try:
-            # 动态调整组内并发
-            group_concurrency = max(1, min(
-                self.concurrency,
-                self.concurrency // (len(channels) // self.max_channels_per_ip + 1)
-            ))
-            group_semaphore = asyncio.BoundedSemaphore(group_concurrency)
-            
-            async def process_channel(channel):
-                async with group_semaphore:
-                    await self._test_single_channel(
-                        session, channel, progress_cb, failed_urls, white_list)
-            
-            await self._safe_gather([process_channel(ch) for ch in channels])
-            
-            # 成功则重置失败计数
-            if ip in self.failed_ips:
-                del self.failed_ips[ip]
-                
-        except Exception as e:
-            self.failed_ips[ip] += 1
-            self.log.error("❌ IP组 %s 测试异常: %s", ip, str(e))
-            
-            if self.failed_ips[ip] >= self.max_failures_per_ip:
-                self.blocked_ips.add(ip)
-                self.log.warning("🛑 屏蔽IP %s (连续失败 %d 次)", ip, self.failed_ips[ip])
+            self.log.error("频道测试异常 %s: %s", channel.name, str(e))
+            failed_urls.add(channel.url)
+            channel.status = 'offline'
         finally:
-            self.ip_cooldown[ip] = time.time()
+            # 释放槽位
+            async with self._task_condition:
+                self._active_tasks -= 1
+                self._task_condition.notify_all()
+            progress_cb(1)
 
     async def _test_single_channel(self,
                                  session: aiohttp.ClientSession,
@@ -288,24 +204,29 @@ class SpeedTester:
         if self._is_in_white_list(channel, white_list):
             channel.status = 'online'
             self.log.debug("🟢 白名单跳过 %s", channel.name)
-            progress_cb(1)
             return
 
-        async with self.semaphore:
-            try:
-                self.log.debug("🔍 开始测试 %s", channel.name)
+        if channel.url in self.blocked_ips:
+            channel.status = 'offline'
+            failed_urls.add(channel.url)
+            return
 
-                success, speed, latency = await self._unified_test(session, channel)
+        try:
+            self.log.debug("🔍 开始测试 %s", channel.name)
+
+            success, speed, latency = await self._unified_test(session, channel)
+            
+            if success:
+                self._handle_success(channel, speed, latency)
+            else:
+                self._handle_failure(channel, failed_urls, speed, latency)
                 
-                if success:
-                    self._handle_success(channel, speed, latency)
-                else:
-                    self._handle_failure(channel, failed_urls, speed, latency)
-                    
-            except Exception as e:
-                self._handle_error(channel, failed_urls, e)
-            finally:
-                progress_cb(1)
+        except asyncio.TimeoutError:
+            self._handle_timeout(channel, failed_urls)
+        except aiohttp.ClientError as e:
+            self._handle_client_error(channel, failed_urls, e)
+        except Exception as e:
+            self._handle_error(channel, failed_urls, e)
 
     async def _unified_test(self,
                           session: aiohttp.ClientSession,
@@ -315,7 +236,6 @@ class SpeedTester:
             headers = {'User-Agent': 'Mozilla/5.0'}
             is_udp = self._is_udp_url(channel.url)
             timeout_val = self.udp_timeout if is_udp else self.http_timeout
-            timeout = aiohttp.ClientTimeout(total=timeout_val)
             
             # 协议阈值
             min_speed = self.min_udp_download_speed if is_udp else self.min_download_speed
@@ -323,7 +243,7 @@ class SpeedTester:
 
             # 阶段1：快速HEAD请求测延迟
             latency_start = time.perf_counter()
-            async with session.head(channel.url, headers=headers, timeout=timeout) as resp:
+            async with session.head(channel.url, headers=headers, timeout=timeout_val) as resp:
                 latency = (time.perf_counter() - latency_start) * 1000
                 if latency > max_latency or resp.status != 200:
                     return False, 0.0, latency
@@ -333,7 +253,7 @@ class SpeedTester:
             content_size = 0
             
             # 使用iter_chunked分块读取，避免一次性加载大文件
-            async with session.get(channel.url, headers=headers, timeout=timeout) as resp:
+            async with session.get(channel.url, headers=headers, timeout=timeout_val) as resp:
                 async for chunk in resp.content.iter_chunked(1024 * 4):  # 4KB chunks
                     content_size += len(chunk)
                     # 达到最大下载量时提前结束
@@ -346,10 +266,9 @@ class SpeedTester:
 
         except asyncio.TimeoutError:
             return False, 0.0, 0.0
-        except aiohttp.ClientError as e:
+        except aiohttp.ClientError:
             return False, 0.0, 0.0
-        except Exception as e:
-            self.log.error("测试错误 %s: %s", channel.url, str(e)[:100])
+        except Exception:
             return False, 0.0, 0.0
 
     def _handle_success(self,
@@ -364,7 +283,7 @@ class SpeedTester:
         
         protocol = "UDP" if self._is_udp_url(channel.url) else "HTTP"
         self.log.info(
-            "✅ 成功 | %-5s | %-5s | %6.1fKB/s | %4.0fms | %s",
+            "✅ 成功 | %-5s | %-30s | %6.1fKB/s | %4.0fms | %s",
             protocol, channel.name[:30], speed, latency,
             self._simplify_url(channel.url)
         )
@@ -392,9 +311,40 @@ class SpeedTester:
         )
         
         self.log.warning(
-            "❌ 失败 | %-5s | %-5s | %6.1fKB/s | %4.0fms | %-8s | %s",
+            "❌ 失败 | %-5s | %-30s | %6.1fKB/s | %4.0fms | %-8s | %s",
             "UDP" if is_udp else "HTTP",
             channel.name[:30], speed, latency, reason,
+            self._simplify_url(channel.url)
+        )
+
+    def _handle_timeout(self,
+                       channel: Channel,
+                       failed_urls: Set[str]) -> None:
+        """处理超时"""
+        failed_urls.add(channel.url)
+        channel.status = 'offline'
+        ip = self._extract_ip_from_url(channel.url)
+        self.failed_ips[ip] += 1
+        
+        self.log.warning(
+            "⏰ 超时 | %-30s | %s",
+            channel.name[:30],
+            self._simplify_url(channel.url)
+        )
+
+    def _handle_client_error(self,
+                           channel: Channel,
+                           failed_urls: Set[str],
+                           error: Exception) -> None:
+        """处理客户端错误"""
+        failed_urls.add(channel.url)
+        channel.status = 'offline'
+        ip = self._extract_ip_from_url(channel.url)
+        self.failed_ips[ip] += 1
+        
+        self.log.error(
+            "🌐 客户端错误 | %-30s | %-20s | %s",
+            channel.name[:30], str(error)[:20],
             self._simplify_url(channel.url)
         )
 
@@ -442,3 +392,43 @@ class SpeedTester:
         if not white_list:
             return False
         return channel.name.lower() in white_list
+
+    def _group_channels_by_ip(self, 
+                            channels: List[Channel],
+                            white_list: Set[str]) -> Dict[str, List[Channel]]:
+        """
+        改进版IP分组逻辑
+        返回: { "ip_0": [ch1,ch2...], "ip_1": [...] }
+        """
+        groups = defaultdict(list)
+        ip_counter = defaultdict(int)
+        
+        # 白名单独立分组
+        whitelist_group = [ch for ch in channels if self._is_in_white_list(ch, white_list)]
+        if whitelist_group:
+            groups["whitelist"] = whitelist_group
+        
+        # 常规分组
+        for ch in channels:
+            if self._is_in_white_list(ch, white_list):
+                continue
+                
+            ip = self._extract_ip_from_url(ch.url)
+            group_idx = ip_counter[ip] // self.max_channels_per_ip
+            group_key = f"{ip}_{group_idx}"
+            
+            groups[group_key].append(ch)
+            ip_counter[ip] += 1
+            
+            self.log.debug("IP %s 频道数超过 %d，创建分组 %s", 
+                         ip, self.max_channels_per_ip, group_key)
+        
+        return groups
+
+    def clear_resources(self):
+        """清理资源"""
+        self.failed_ips.clear()
+        self.blocked_ips.clear()
+        self.ip_cooldown.clear()
+        self._active_tasks = 0
+        gc.collect()

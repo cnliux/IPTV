@@ -92,7 +92,7 @@ class PlaylistParser:
         for name, url, category, logo in channel_matches:
             channel = Channel(
                 name=self._clean_name(name),
-                url=self._clean_url(url),
+                url=self._clean_url(url),  # 这里调用清理URL函数
                 original_category=category or "未分类"  # 确保始终有分类
             )
             if logo:
@@ -111,9 +111,25 @@ class PlaylistParser:
         return raw_name.split(',')[-1].strip()
 
     def _clean_url(self, raw_url: str) -> str:
-        """清理URL（带参数过滤）"""
+        """清理URL（带参数过滤）- 修复URL拼接问题"""
+        # 第一步：处理多个URL用#分隔的情况（取第一个有效URL）
+        if '#' in raw_url:
+            # 分割所有可能的URL
+            url_parts = [part.strip() for part in raw_url.split('#') if part.strip()]
+            
+            # 优先选择有效的HTTP/HTTPS URL
+            for url_part in url_parts:
+                if url_part.startswith(('http://', 'https://', 'udp://', 'rtp://', 'rtsp://')):
+                    raw_url = url_part
+                    break
+            else:
+                # 如果没有找到协议开头的URL，取第一个部分
+                raw_url = url_parts[0] if url_parts else raw_url
+        
+        # 第二步：处理$符号（通常用于参数分隔）
         url = raw_url.split('$')[0].strip()
         
+        # 第三步：过滤不需要的URL参数
         if self.params_to_remove:
             try:
                 parsed = urlparse(url)
@@ -125,4 +141,40 @@ class PlaylistParser:
             except Exception as e:
                 logger.warning(f"URL参数处理失败: {url}, 错误: {str(e)}")
         
+        # 第四步：验证URL格式
+        if not self._is_valid_url(url):
+            logger.warning(f"无效URL格式: {url}")
+            return ""  # 返回空字符串而不是无效URL
+        
         return url
+
+    def _is_valid_url(self, url: str) -> bool:
+        """验证URL格式是否有效"""
+        try:
+            parsed = urlparse(url)
+            # 基本验证：需要有协议和网络位置
+            if not parsed.scheme or not parsed.netloc:
+                return False
+            
+            # 支持的协议
+            valid_schemes = {'http', 'https', 'udp', 'rtp', 'rtsp'}
+            if parsed.scheme not in valid_schemes:
+                return False
+                
+            return True
+        except Exception:
+            return False
+
+    def _extract_primary_url(self, raw_url: str) -> str:
+        """从多个URL中提取主要URL（备用方法）"""
+        # 方法1：按#分割，取第一个
+        primary_url = raw_url.split('#')[0].strip()
+        
+        # 方法2：如果第一个URL无效，尝试找第一个有效的
+        if not self._is_valid_url(primary_url):
+            url_parts = [part.strip() for part in raw_url.split('#') if part.strip()]
+            for url_part in url_parts:
+                if self._is_valid_url(url_part):
+                    return url_part
+        
+        return primary_url

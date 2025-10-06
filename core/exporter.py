@@ -13,7 +13,7 @@ import shutil
 logger = logging.getLogger(__name__)
 
 class ResultExporter:
-    """增强版结果导出器（强制隔离未分类频道）"""
+    """增强版结果导出器（修复M3U拼接问题）"""
 
     def __init__(self, 
                 output_dir: str, 
@@ -129,20 +129,70 @@ class ResultExporter:
         )
 
     def _export_m3u(self, channels: List[Channel], file_path: Path) -> int:
-        """M3U格式导出"""
+        """M3U格式导出（修复版）"""
         online_channels = [c for c in channels if c.status == 'online']
         
         with open(file_path, 'w', encoding='utf-8') as f:
+            # 写入M3U文件头
             f.write(self._get_m3u_header())
+            
+            # 按分类分组频道
+            channels_by_category = defaultdict(list)
             for channel in online_channels:
-                logo_url = self.config.get('EXPORTER', 'm3u_logo_url', fallback='').format(
-                    name=quote(channel.name),
-                    category=quote(channel.category)
-                )
-                f.write(f'#EXTINF:-1 tvg-name="{channel.name}" group-title="{channel.category}" tvg-logo="{logo_url}",{channel.name}\n')
-                f.write(f"{channel.url}\n")
+                channels_by_category[channel.category].append(channel)
+            
+            # 按模板顺序写入分类
+            for category in self._get_template_order():
+                if category in channels_by_category:
+                    category_channels = channels_by_category[category]
+                    for channel in category_channels:
+                        self._write_m3u_channel(f, channel)
+            
+            # 写入其他分类（按字母顺序）
+            other_categories = sorted([cat for cat in channels_by_category.keys() 
+                                     if cat not in self._get_template_order()])
+            for category in other_categories:
+                for channel in channels_by_category[category]:
+                    self._write_m3u_channel(f, channel)
         
         return len(online_channels)
+
+    def _write_m3u_channel(self, file_obj, channel: Channel) -> None:
+        """写入单个频道到M3U文件（修复格式问题）"""
+        try:
+            # 生成台标URL
+            logo_url = self.config.get('EXPORTER', 'm3u_logo_url', fallback='').format(
+                name=quote(channel.name),
+                category=quote(channel.category)
+            )
+            
+            # 清理频道名称（移除可能影响格式的特殊字符）
+            clean_name = re.sub(r'[\r\n]', '', channel.name)
+            clean_category = re.sub(r'[\r\n]', '', channel.category)
+            
+            # 写入EXTINF行
+            extinf_line = f'#EXTINF:-1 tvg-name="{clean_name}" group-title="{clean_category}" tvg-logo="{logo_url}",{clean_name}\n'
+            file_obj.write(extinf_line)
+            
+            # 写入URL行
+            file_obj.write(f"{channel.url}\n")
+            
+        except Exception as e:
+            logger.warning(f"写入频道失败 {channel.name}: {str(e)}")
+
+    def _get_template_order(self) -> List[str]:
+        """获取模板中的分类顺序"""
+        try:
+            order = []
+            with open(self.template_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.endswith(',#genre#'):
+                        category = line.split(',')[0]
+                        order.append(category)
+            return order
+        except Exception:
+            return []
 
     def _export_txt(self, channels: List[Channel], file_path: Path) -> int:
         """TXT格式导出（兼容传统播放器）"""
@@ -151,20 +201,31 @@ class ResultExporter:
         count = 0
         
         with open(file_path, 'w', encoding='utf-8') as f:
+            # 按分类分组
+            channels_by_category = defaultdict(list)
             for channel in channels:
-                if channel.status != 'online' or channel.url in seen_urls:
-                    continue
-                    
-                seen_urls.add(channel.url)
-                
-                if channel.category != current_category:
-                    if current_category is not None:
-                        f.write("\n")
-                    f.write(f"{channel.category},#genre#\n")
-                    current_category = channel.category
-                
-                f.write(f"{channel.name},{channel.url}\n")
-                count += 1
+                if channel.status == 'online' and channel.url not in seen_urls:
+                    seen_urls.add(channel.url)
+                    channels_by_category[channel.category].append(channel)
+            
+            # 按模板顺序写入分类
+            for category in self._get_template_order():
+                if category in channels_by_category:
+                    f.write(f"{category},#genre#\n")
+                    for channel in channels_by_category[category]:
+                        f.write(f"{channel.name},{channel.url}\n")
+                        count += 1
+                    f.write("\n")
+            
+            # 写入其他分类（按字母顺序）
+            other_categories = sorted([cat for cat in channels_by_category.keys() 
+                                     if cat not in self._get_template_order()])
+            for category in other_categories:
+                f.write(f"{category},#genre#\n")
+                for channel in channels_by_category[category]:
+                    f.write(f"{channel.name},{channel.url}\n")
+                    count += 1
+                f.write("\n")
                 
         return count
 

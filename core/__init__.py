@@ -19,5 +19,6 @@ __all__ = [
 ]
 
 # 版本信息
-__version__ = '1.0.1'
+__version__ = '1.0.2'
 __author__ = 'https://github.com/cnliux/IPTV/'
+#修复windows并发超出报错
