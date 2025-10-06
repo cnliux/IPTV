@@ -63,21 +63,14 @@ async def fetch_sources(fetcher: SourceFetcher, urls: List[str], logger: logging
             await asyncio.sleep(2 ** attempt)
     return [c for c in contents if c and c.strip()]
 
-def parse_channels(parser: PlaylistParser, contents: List[str], source_urls: List[str], logger: logging.Logger) -> List[Channel]:
-    """解析所有频道（带源文件标识）"""
+def parse_channels(parser: PlaylistParser, contents: List[str], logger: logging.Logger) -> List[Channel]:
+    """解析所有频道"""
     all_channels = []
     progress = SmartProgress(len(contents), "解析进度")
     
-    for i, (content, source_url) in enumerate(zip(contents, source_urls)):
+    for content in contents:
         try:
-            # 设置当前处理的源文件
-            parser.set_current_source(source_url)
             channels = list(parser.parse(content))
-            
-            # 为每个频道添加源文件信息
-            for channel in channels:
-                channel.source_file = source_url
-            
             all_channels.extend(channels)
             
             if len(all_channels) % 5000 == 0:
@@ -85,7 +78,7 @@ def parse_channels(parser: PlaylistParser, contents: List[str], source_urls: Lis
                 
             progress.update()
         except Exception as e:
-            logger.error(f"解析异常 源文件[{source_url}]: {str(e)}")
+            logger.error(f"解析异常: {str(e)}")
             continue
     
     progress.complete()
@@ -97,12 +90,6 @@ def remove_duplicates(channels: List[Channel], logger: logging.Logger) -> List[C
     unique_channels = {channel.url: channel for channel in channels}
     progress.update(len(channels))
     progress.complete()
-    
-    # 记录去重统计
-    duplicate_count = len(channels) - len(unique_channels)
-    if duplicate_count > 0:
-        logger.info(f"去重完成 | 原始: {len(channels)} | 去重后: {len(unique_channels)} | 重复: {duplicate_count}")
-    
     return list(unique_channels.values())
 
 def filter_blacklist(channels: List[Channel], blacklist: Set[str], logger: logging.Logger) -> List[Channel]:
@@ -112,13 +99,8 @@ def filter_blacklist(channels: List[Channel], blacklist: Set[str], logger: loggi
         
     progress = SmartProgress(len(channels), "过滤进度")
     filtered = [c for c in channels if not is_blacklisted(c, blacklist)]
-    removed_count = len(channels) - len(filtered)
     progress.update(len(channels))
     progress.complete()
-    
-    if removed_count > 0:
-        logger.info(f"黑名单过滤 | 移除: {removed_count} | 剩余: {len(filtered)}")
-    
     return filtered
 
 def classify_channels(matcher: AutoCategoryMatcher, channels: List[Channel], logger: logging.Logger) -> List[Channel]:
@@ -130,27 +112,13 @@ def classify_channels(matcher: AutoCategoryMatcher, channels: List[Channel], log
     
     # 应用分类结果
     processed = []
-    uncategorized_count = 0
-    
     for channel in channels:
-        original_category = channel.category
         channel.category = category_mapping[channel.name]
         channel.name = matcher.normalize_channel_name(channel.name)
-        
-        if channel.category == "未分类":
-            uncategorized_count += 1
-            # 记录未分类频道的源信息
-            logger.debug(f"未分类频道: {channel.name} | 源文件: {getattr(channel, 'source_file', 'unknown')}")
-        
         processed.append(channel)
         progress.update()
     
     progress.complete()
-    
-    # 分类统计
-    categorized_count = len(processed) - uncategorized_count
-    logger.info(f"分类完成 | 已分类: {categorized_count} | 未分类: {uncategorized_count} | 成功率: {categorized_count/len(processed)*100:.1f}%")
-    
     return processed
 
 async def test_channels(tester: SpeedTester, channels: List[Channel], whitelist: Set[str], logger: logging.Logger) -> Set[str]:
@@ -189,40 +157,8 @@ async def test_channels(tester: SpeedTester, channels: List[Channel], whitelist:
 async def export_results(exporter: ResultExporter, channels: List[Channel], whitelist: Set[str], logger: logging.Logger) -> None:
     """结果导出"""
     progress = SmartProgress(1, "导出进度")
-    
-    # 导出前统计
-    online_channels = [c for c in channels if c.status == 'online']
-    offline_channels = [c for c in channels if c.status == 'offline']
-    
-    logger.info(f"导出准备 | 在线: {len(online_channels)} | 离线: {len(offline_channels)}")
-    
     exporter.export(channels, whitelist, progress.update)  # 同步调用
     progress.complete()
-
-def analyze_invalid_urls(contents: List[str], urls: List[str], logger: logging.Logger):
-    """分析无效URL并定位源文件"""
-    logger.info("\n🔍 分析订阅源中的无效URL...")
-    
-    invalid_pattern = re.compile(r'http:///rtp/')
-    found_invalid = False
-    
-    for content, source_url in zip(contents, urls):
-        if not content.strip():
-            continue
-            
-        matches = invalid_pattern.findall(content)
-        if matches:
-            found_invalid = True
-            logger.warning(f"📛 在源文件发现 {len(matches)} 个无效URL: {source_url}")
-            
-            # 显示具体行内容
-            lines = content.split('\n')
-            for i, line in enumerate(lines):
-                if invalid_pattern.search(line):
-                    logger.warning(f"  行 {i+1}: {line.strip()}")
-    
-    if not found_invalid:
-        logger.info("✅ 未发现明显的无效URL格式")
 
 # ==================== 主流程 ====================
 def print_start_page(config: configparser.ConfigParser, logger: logging.Logger):
@@ -293,8 +229,7 @@ def print_start_page(config: configparser.ConfigParser, logger: logging.Logger):
 def setup_logging(config: configparser.ConfigParser) -> logging.Logger:
     """配置日志系统"""
     logger = logging.getLogger()
-    log_level = config.get('LOGGING', 'log_level', fallback='INFO').upper()
-    logger.setLevel(getattr(logging, log_level))
+    logger.setLevel(config.get('LOGGING', 'log_level', fallback='INFO').upper())
 
     for handler in logger.handlers[:]:
         logger.removeHandler(handler)
@@ -345,7 +280,7 @@ async def main():
         print_start_page(config, logger)
 
         # ==================== 数据准备阶段 ====================
-        logger.info("\n🔹🔹🔹🔹🔹🔹🔹🔹 阶段1/7：数据准备")
+        logger.info("\n🔹🔹🔹🔹 阶段1/7：数据准备")
         blacklist = load_list_file(config.get('BLACKLIST', 'blacklist_path', fallback='config/blacklist.txt'))
         whitelist = load_list_file(config.get('WHITELIST', 'whitelist_path', fallback='config/whitelist.txt'))
         urls = load_urls(config.get('PATHS', 'urls_path', fallback='config/urls.txt'))
@@ -354,7 +289,7 @@ async def main():
         logger.info(f"• 加载订阅源: {len(urls)}个")
 
         # ==================== 订阅源获取阶段 ====================
-        logger.info("\n🔹🔹🔹🔹🔹🔹🔹🔹 阶段2/7：获取订阅源")
+        logger.info("\n🔹🔹🔹🔹 阶段2/7：获取订阅源")
         fetcher = SourceFetcher(
             timeout=config.getfloat('FETCHER', 'timeout', fallback=15),
             concurrency=config.getint('FETCHER', 'concurrency', fallback=5),
@@ -363,24 +298,21 @@ async def main():
         contents = await fetch_sources(fetcher, urls, logger)
         logger.info(f"✅ 获取完成 | 成功: {len(contents)}/{len(urls)}")
 
-        # ==================== 无效URL分析 ====================
-        analyze_invalid_urls(contents, urls, logger)
-
         # ==================== 频道解析阶段 ====================
-        logger.info("\n🔹🔹🔹🔹🔹🔹🔹🔹 阶段3/7：解析频道")
+        logger.info("\n🔹🔹🔹🔹 阶段3/7：解析频道")
         parser = PlaylistParser(config)
-        all_channels = parse_channels(parser, contents, urls, logger)
+        all_channels = parse_channels(parser, contents, logger)
         unique_sources = len({c.url for c in all_channels})
         logger.info(f"✅ 解析完成 | 总频道: {len(all_channels)} | 唯一源: {unique_sources}")
 
         # ==================== 数据处理阶段 ====================
-        logger.info("\n🔹🔹🔹🔹🔹🔹🔹🔹 阶段4/7：数据处理")
+        logger.info("\n🔹🔹🔹🔹 阶段4/7：数据处理")
         unique_channels = remove_duplicates(all_channels, logger)
         filtered_channels = filter_blacklist(unique_channels, blacklist, logger)
         logger.info(f"✔ 处理完成 | 去重后: {len(unique_channels)} | 过滤后: {len(filtered_channels)}")
 
         # ==================== 智能分类阶段 ====================
-        logger.info("\n🔹🔹🔹🔹🔹🔹🔹🔹 阶段5/7：智能分类")
+        logger.info("\n🔹🔹🔹🔹 阶段5/7：智能分类")
         matcher = AutoCategoryMatcher(
             config.get('PATHS', 'templates_path', fallback='config/templates.txt'),
             config
@@ -390,7 +322,7 @@ async def main():
         logger.info(f"✅ 分类完成 | 已分类: {classified} | 未分类: {len(processed_channels)-classified}")
 
         # ==================== 测速测试阶段 ====================
-        logger.info("\n🔹🔹🔹🔹🔹🔹🔹🔹 阶段6/7：测速测试")
+        logger.info("\n🔹🔹🔹🔹 阶段6/7：测速测试")
         tester = SpeedTester(
             timeout=config.getfloat('TESTER', 'timeout', fallback=10),
             concurrency=config.getint('TESTER', 'concurrency', fallback=8),
@@ -405,7 +337,7 @@ async def main():
         logger.info(f"✅ 测速完成 | 在线: {online_count}/{len(sorted_channels)} | 失败: {len(failed_urls)}")
 
         # ==================== 结果导出阶段 ====================
-        logger.info("\n🔹🔹🔹🔹🔹🔹🔹🔹 阶段7/7：结果导出")
+        logger.info("\n🔹🔹🔹🔹 阶段7/7：结果导出")
         exporter = ResultExporter(
             output_dir=config.get('MAIN', 'output_dir', fallback='outputs'),
             template_path=config.get('PATHS', 'templates_path'),
@@ -416,27 +348,14 @@ async def main():
 
         # ==================== 最终统计 ====================
         logger.info("\n" + "="*60)
-        logger.info("📊📊📊📊 最终统计")
+        logger.info("📊📊 最终统计")
         logger.info(f"• 总处理频道: {len(sorted_channels)}")
         logger.info(f"• 在线频道: {online_count} (成功率: {online_count/len(sorted_channels)*100:.1f}%)")
         logger.info(f"• 未分类频道: {len(processed_channels)-classified}")
-        logger.info(f"• 失败URL: {len(failed_urls)}")
-        
-        # 源文件统计
-        source_stats = defaultdict(int)
-        for channel in sorted_channels:
-            if hasattr(channel, 'source_file'):
-                source_stats[channel.source_file] += 1
-        
-        if source_stats:
-            logger.info("\n📁 源文件贡献统计:")
-            for source, count in sorted(source_stats.items(), key=lambda x: x[1], reverse=True):
-                logger.info(f"  • {source}: {count}个频道")
-        
-        logger.info("="*60 + "\n🎉🎉🎉🎉 任务完成！")
+        logger.info("="*60 + "\n🎉🎉 任务完成！")
 
     except KeyboardInterrupt:
-        logger.error("\n🛑🛑🛑🛑🛑🛑🛑🛑🛑 用户中断操作")
+        logger.error("\n🛑🛑🛑 用户中断操作")
         sys.exit(0)
     except Exception as e:
         logger.error("\n" + "‼️"*20)
