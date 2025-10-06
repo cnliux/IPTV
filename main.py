@@ -122,21 +122,36 @@ def classify_channels(matcher: AutoCategoryMatcher, channels: List[Channel], log
     return processed
 
 async def test_channels(tester: SpeedTester, channels: List[Channel], whitelist: Set[str], logger: logging.Logger) -> Set[str]:
-    """测速测试"""
+    """测速测试（修复Windows限制）"""
     if not channels:
         logger.warning("⚠️ 无频道需要测速")
         return set()
 
     failed_urls = set()
-    batch_size = min(5000, len(channels))
+    
+    # Windows系统使用更小的批次大小
+    if os.name == 'nt':
+        batch_size = min(200, len(channels) // 5 or 50)
+    else:
+        batch_size = min(1000, len(channels) // 10 or 100)
+    
     progress = SmartProgress(len(channels), "测速进度")
     
-    for i in range(0, len(channels), batch_size):
-        batch = channels[i:i+batch_size]
-        await tester.test_channels(batch, progress.update, failed_urls, whitelist)
-        gc.collect()
+    try:
+        for i in range(0, len(channels), batch_size):
+            batch = channels[i:i+batch_size]
+            await tester.test_channels(batch, progress.update, failed_urls, whitelist)
+            
+            # 批处理间延迟，避免资源耗尽
+            if i + batch_size < len(channels):
+                await asyncio.sleep(1)
+                gc.collect()
+                
+    except Exception as e:
+        logger.error(f"测速过程异常: {str(e)}")
+    finally:
+        progress.complete()
     
-    progress.complete()
     return failed_urls
 
 async def export_results(exporter: ResultExporter, channels: List[Channel], whitelist: Set[str], logger: logging.Logger) -> None:
@@ -170,7 +185,7 @@ def print_start_page(config: configparser.ConfigParser, logger: logging.Logger):
     fetcher_concurrency = config.getint('FETCHER', 'concurrency', fallback=5)
     tester_timeout = config.getfloat('TESTER', 'timeout', fallback=10)
     tester_concurrency = config.getint('TESTER', 'concurrency', fallback=8)
-    tester_logging = config.getboolean('TESTER', 'enable_logging', fallback=False)  # 新增测速日志开关
+    tester_logging = config.getboolean('TESTER', 'enable_logging', fallback=False)
     enable_history = config.getboolean('EXPORTER', 'enable_history', fallback=False)
     log_level = config.get('LOGGING', 'log_level', fallback='INFO').upper()
     
@@ -238,6 +253,17 @@ def setup_logging(config: configparser.ConfigParser) -> logging.Logger:
     
     return logger
 
+def increase_file_limit():
+    """尝试提高Windows文件描述符限制"""
+    if os.name == 'nt':
+        try:
+            import ctypes
+            # 尝试提高限制到2048
+            ctypes.windll.ws2_32.WSASetMaxSocketCount(2048)
+            logging.getLogger().info("成功提高Windows socket限制")
+        except Exception:
+            logging.getLogger().warning("无法提高Windows socket限制，使用保守配置")
+
 async def main():
     """主工作流程（完整修复版）"""
     try:
@@ -246,11 +272,15 @@ async def main():
         config = configparser.ConfigParser()
         config.read('config/config.ini', encoding='utf-8')
         logger = setup_logging(config)
+        
+        # 尝试提高文件限制
+        increase_file_limit()
+        
         logger.info("✅ 配置加载完成")
         print_start_page(config, logger)
 
         # ==================== 数据准备阶段 ====================
-        logger.info("\n🔹🔹 阶段1/7：数据准备")
+        logger.info("\n🔹🔹🔹🔹 阶段1/7：数据准备")
         blacklist = load_list_file(config.get('BLACKLIST', 'blacklist_path', fallback='config/blacklist.txt'))
         whitelist = load_list_file(config.get('WHITELIST', 'whitelist_path', fallback='config/whitelist.txt'))
         urls = load_urls(config.get('PATHS', 'urls_path', fallback='config/urls.txt'))
@@ -259,7 +289,7 @@ async def main():
         logger.info(f"• 加载订阅源: {len(urls)}个")
 
         # ==================== 订阅源获取阶段 ====================
-        logger.info("\n🔹🔹 阶段2/7：获取订阅源")
+        logger.info("\n🔹🔹🔹🔹 阶段2/7：获取订阅源")
         fetcher = SourceFetcher(
             timeout=config.getfloat('FETCHER', 'timeout', fallback=15),
             concurrency=config.getint('FETCHER', 'concurrency', fallback=5),
@@ -269,20 +299,20 @@ async def main():
         logger.info(f"✅ 获取完成 | 成功: {len(contents)}/{len(urls)}")
 
         # ==================== 频道解析阶段 ====================
-        logger.info("\n🔹🔹 阶段3/7：解析频道")
+        logger.info("\n🔹🔹🔹🔹 阶段3/7：解析频道")
         parser = PlaylistParser(config)
         all_channels = parse_channels(parser, contents, logger)
         unique_sources = len({c.url for c in all_channels})
         logger.info(f"✅ 解析完成 | 总频道: {len(all_channels)} | 唯一源: {unique_sources}")
 
         # ==================== 数据处理阶段 ====================
-        logger.info("\n🔹🔹 阶段4/7：数据处理")
+        logger.info("\n🔹🔹🔹🔹 阶段4/7：数据处理")
         unique_channels = remove_duplicates(all_channels, logger)
         filtered_channels = filter_blacklist(unique_channels, blacklist, logger)
         logger.info(f"✔ 处理完成 | 去重后: {len(unique_channels)} | 过滤后: {len(filtered_channels)}")
 
         # ==================== 智能分类阶段 ====================
-        logger.info("\n🔹🔹 阶段5/7：智能分类")
+        logger.info("\n🔹🔹🔹🔹 阶段5/7：智能分类")
         matcher = AutoCategoryMatcher(
             config.get('PATHS', 'templates_path', fallback='config/templates.txt'),
             config
@@ -292,13 +322,13 @@ async def main():
         logger.info(f"✅ 分类完成 | 已分类: {classified} | 未分类: {len(processed_channels)-classified}")
 
         # ==================== 测速测试阶段 ====================
-        logger.info("\n🔹🔹 阶段6/7：测速测试")
+        logger.info("\n🔹🔹🔹🔹 阶段6/7：测速测试")
         tester = SpeedTester(
             timeout=config.getfloat('TESTER', 'timeout', fallback=10),
             concurrency=config.getint('TESTER', 'concurrency', fallback=8),
             max_attempts=config.getint('TESTER', 'max_attempts', fallback=2),
             min_download_speed=config.getfloat('TESTER', 'min_download_speed', fallback=0.1),
-            enable_logging=config.getboolean('TESTER', 'enable_logging', fallback=False),  # 关键修复点
+            enable_logging=config.getboolean('TESTER', 'enable_logging', fallback=False),
             config=config
         )
         sorted_channels = matcher.sort_channels_by_template(processed_channels, whitelist)
@@ -307,7 +337,7 @@ async def main():
         logger.info(f"✅ 测速完成 | 在线: {online_count}/{len(sorted_channels)} | 失败: {len(failed_urls)}")
 
         # ==================== 结果导出阶段 ====================
-        logger.info("\n🔹🔹 阶段7/7：结果导出")
+        logger.info("\n🔹🔹🔹🔹 阶段7/7：结果导出")
         exporter = ResultExporter(
             output_dir=config.get('MAIN', 'output_dir', fallback='outputs'),
             template_path=config.get('PATHS', 'templates_path'),
@@ -318,14 +348,14 @@ async def main():
 
         # ==================== 最终统计 ====================
         logger.info("\n" + "="*60)
-        logger.info("📊 最终统计")
+        logger.info("📊📊 最终统计")
         logger.info(f"• 总处理频道: {len(sorted_channels)}")
         logger.info(f"• 在线频道: {online_count} (成功率: {online_count/len(sorted_channels)*100:.1f}%)")
         logger.info(f"• 未分类频道: {len(processed_channels)-classified}")
-        logger.info("="*60 + "\n🎉 任务完成！")
+        logger.info("="*60 + "\n🎉🎉 任务完成！")
 
     except KeyboardInterrupt:
-        logger.error("\n🛑 用户中断操作")
+        logger.error("\n🛑🛑🛑 用户中断操作")
         sys.exit(0)
     except Exception as e:
         logger.error("\n" + "‼️"*20)
