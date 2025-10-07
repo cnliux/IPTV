@@ -3,7 +3,7 @@ name: 每日自动更新
 on:
   schedule:
     # 每天北京时间早上1点运行
-    - cron: '0 17 * * *'
+    - cron: '0 19 * * *'
   
   # 支持手动触发工作流
   workflow_dispatch:
