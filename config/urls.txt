@@ -5,6 +5,7 @@ https://raw.githubusercontent.com/qy1987/TV1999/refs/heads/main/outputs/all.m3u
 https://raw.githubusercontent.com/Supprise0901/TVBox_live/refs/heads/main/live.txt
 https://raw.githubusercontent.com/suxuang/myIPTV/refs/heads/main/ipv6.m3u
 https://raw.githubusercontent.com/jiangnan1224/iptv_ipv4_live/refs/heads/main/iptv.txt
+https://raw.githubusercontent.com/develop202/migu_video/refs/heads/main/interface.txt
 https://raw.githubusercontent.com/n3rddd/CTVLive/main/live.txt
 https://cnliux.github.io/tv.m3u
 https://raw.githubusercontent.com/adminouyang/dszby/d5be6fa2b1e4d1f69ad2bd0f907a88a4735425e0/merged_output.txt
